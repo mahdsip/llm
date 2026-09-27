@@ -1,0 +1,5 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+requests==2.32.3
+langchain==0.2.14
+langchain-community==0.2.12
