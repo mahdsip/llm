@@ -36,19 +36,39 @@ Usuario
 
 ### 1. RAG local — `model-rag-local/`
 
-Despliegue completamente local sobre Linux sin GPU dedicada, usando contenedores Docker.
+Despliegue completamente local sobre Linux sin GPU dedicada, usando contenedores Docker. El modelo de lenguaje corre **en la propia máquina** vía Ollama — ningún dato sale al exterior.
 
 | Módulo | Servicio | Tecnología | Rol |
 |--------|---------|-----------|-----|
-| **LLM** | `agentsvc` | Ollama · `llama3.1:8b` · LangChain | Interpreta la pregunta, decide cuándo buscar en documentos mediante function calling y redacta la respuesta final |
-| **RAG** | `ragapi` | LlamaIndex · `nomic-embed-text` · Qdrant | Indexa documentos locales, genera embeddings y responde consultas de similitud devolviendo solo fragmentos |
+| **LLM** | `agentsvc` + Ollama | `llama3.1:8b` · LangChain | El modelo local recibe la pregunta, decide si necesita consultar los documentos (function calling con `search_rag`), evalúa los fragmentos recuperados y redacta la respuesta final. Ollama sirve el modelo directamente en la máquina, sin llamada externa |
+| **RAG** | `ragapi` | LlamaIndex · `nomic-embed-text` · Qdrant | Indexa documentos locales, genera embeddings con `nomic-embed-text` (también en Ollama local) y responde consultas de similitud devolviendo solo fragmentos — nunca genera lenguaje |
 
-**Flujo:**
+**Ciclo completo por pregunta:**
 ```
-OpenWebUI → agentsvc (LLM) ──search_rag──► ragapi (RAG) → Qdrant
-                 ◄── fragmentos relevantes ──────────────────┘
-                 │
-                 └──► llama3.1:8b → respuesta final
+Usuario
+  │
+  ▼
+OpenWebUI
+  │
+  ▼
+agentsvc  ──[1. interpreta la pregunta]──► llama3.1:8b (Ollama local)
+  │                                              │
+  │         [2. ¿necesito documentos?] ◄─────────┘
+  │                    │ sí
+  ▼                    ▼
+agentsvc ──[3. lanza search_rag]──► ragapi (RAG)
+                                        │
+                                    [4. búsqueda vectorial]
+                                        │
+                                    Qdrant ──► fragmentos relevantes
+                                        │
+  agentsvc ◄──[5. devuelve chunks]──────┘
+  │
+  ▼
+[6. llama3.1:8b evalúa los fragmentos y elabora respuesta]
+  │
+  ▼
+Usuario ◄── respuesta final con fuentes
 ```
 
 **Detalles:** [`model-rag-local/README.md`](model-rag-local/README.md)
