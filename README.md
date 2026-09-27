@@ -36,39 +36,41 @@ Usuario
 
 ### 1. RAG local — `model-rag-local/`
 
-Despliegue completamente local sobre Linux sin GPU dedicada, usando contenedores Docker. El modelo de lenguaje corre **en la propia máquina** vía Ollama — ningún dato sale al exterior.
+Despliegue completamente local sobre Linux sin GPU dedicada, usando contenedores Docker. **Ningún dato sale al exterior**: tanto el modelo de lenguaje como el modelo de embeddings corren en la propia máquina vía Ollama.
 
-| Módulo | Servicio | Tecnología | Rol |
-|--------|---------|-----------|-----|
-| **LLM** | `agentsvc` + Ollama | `llama3.1:8b` · LangChain | El modelo local recibe la pregunta, decide si necesita consultar los documentos (function calling con `search_rag`), evalúa los fragmentos recuperados y redacta la respuesta final. Ollama sirve el modelo directamente en la máquina, sin llamada externa |
-| **RAG** | `ragapi` | LlamaIndex · `nomic-embed-text` · Qdrant | Indexa documentos locales, genera embeddings con `nomic-embed-text` (también en Ollama local) y responde consultas de similitud devolviendo solo fragmentos — nunca genera lenguaje |
+#### Módulo LLM — `agentsvc`
 
-**Ciclo completo por pregunta:**
+`llama3.1:8b` corriendo en Ollama es el cerebro del sistema. Por cada pregunta:
+
+1. **Interpreta** la pregunta del usuario
+2. **Decide** si necesita buscar en los documentos locales (via function calling con `search_rag`)
+3. Si sí, **lanza la consulta** al módulo RAG
+4. **Evalúa** los fragmentos recuperados y los integra como contexto
+5. **Elabora** la respuesta final fundamentada en esos documentos
+
+LangChain orquesta este ciclo en `agentsvc`. Ollama sirve el modelo directamente en la máquina, sin ninguna llamada a API externa.
+
+#### Módulo RAG — `ragapi`
+
+`ragapi` no genera lenguaje. Solo se encarga de:
+
+- Indexar los documentos locales con chunking configurable
+- Generar embeddings con `nomic-embed-text` (también en Ollama local)
+- Almacenar los vectores en Qdrant
+- Responder consultas de similitud devolviendo únicamente fragmentos de texto
+
+#### Flujo completo
+
 ```
-Usuario
-  │
-  ▼
-OpenWebUI
-  │
-  ▼
-agentsvc  ──[1. interpreta la pregunta]──► llama3.1:8b (Ollama local)
-  │                                              │
-  │         [2. ¿necesito documentos?] ◄─────────┘
-  │                    │ sí
-  ▼                    ▼
-agentsvc ──[3. lanza search_rag]──► ragapi (RAG)
-                                        │
-                                    [4. búsqueda vectorial]
-                                        │
-                                    Qdrant ──► fragmentos relevantes
-                                        │
-  agentsvc ◄──[5. devuelve chunks]──────┘
-  │
-  ▼
-[6. llama3.1:8b evalúa los fragmentos y elabora respuesta]
-  │
-  ▼
-Usuario ◄── respuesta final con fuentes
+OpenWebUI → agentsvc → llama3.1:8b (interpreta + decide)
+                │
+                └──[search_rag]──► ragapi → Qdrant
+                                      │
+                ◄── fragmentos ────────┘
+                │
+                └──► llama3.1:8b (evalúa + responde)
+                │
+             Usuario
 ```
 
 **Detalles:** [`model-rag-local/README.md`](model-rag-local/README.md)
