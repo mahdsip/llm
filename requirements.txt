@@ -1,11 +1,9 @@
 # Agente — React loop con Strands Agents SDK
 strands-agents[ollama]==0.2.1
 
-# RAG — backend FAISS (por defecto)
-faiss-cpu==1.9.0
-sentence-transformers==3.3.1
-
-# RAG — backend Qdrant (opcional)
+# RAG — backend Qdrant (único backend soportado)
+# FAISS fue descartado: requiere reconstrucción completa del índice en cada
+# cambio de documentos. Qdrant soporta upserts incrementales.
 qdrant-client==1.11.1
 
 # RAG — LlamaIndex (indexación, ingestión y query engine)
@@ -16,3 +14,4 @@ llama-index-vector-stores-qdrant==0.3.0
 
 # Utilidades
 python-dotenv==1.0.1
+rich==13.9.4
