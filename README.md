@@ -177,6 +177,19 @@ OpenWebUI queda disponible en `http://localhost:3000` y se conecta automáticame
 
 ---
 
+## Seguridad — advertencia sobre `bash_exec`
+
+El agente dispone de la herramienta `bash_exec`, que puede ejecutar cualquier comando de shell con los permisos del usuario que invoca `myagent`. El agente decide de forma autónoma qué comandos ejecutar en función de la conversación.
+
+**Esto significa que el agente puede:**
+- Leer, modificar o eliminar ficheros del sistema de ficheros.
+- Ejecutar procesos arbitrarios.
+- Acceder a la red desde la terminal.
+
+`bash_exec` está diseñado para uso **local y personal**, con el usuario presente en la sesión. No lo expongas a entradas no confiables ni lo ejecutes en servidores compartidos o con permisos elevados. El timeout de 30 s y el truncado de salida limitan el impacto de bucles o salidas masivas, pero no la superficie de ataque general.
+
+---
+
 ## Variables de entorno
 
 Crea un fichero `.env` en la raíz del proyecto. Todas las variables son opcionales; los valores por defecto funcionan para un uso estándar.
@@ -185,14 +198,13 @@ Crea un fichero `.env` en la raíz del proyecto. Todas las variables son opciona
 |---|---|---|
 | `OLLAMA_HOST` | `http://localhost:11434` | URL del servidor Ollama |
 | `OLLAMA_FLASH_ATTENTION` | _(no definida)_ | `1` para forzar Flash Attention, `0` para desactivarla |
-| `DEFAULT_MODEL` | `qwen` | Alias del modelo usado cuando no se pasa `-m` |
-| `QDRANT_HOST` | `localhost` | Host donde corre Qdrant |
-| `QDRANT_PORT` | `6333` | Puerto gRPC/HTTP de Qdrant |
-| `QDRANT_COLLECTION` | `myagent` | Nombre de la colección de vectores |
-| `EMBED_MODEL` | `nomic-embed-text` | Modelo de embeddings (via Ollama) |
-| `CHUNK_SIZE` | `512` | Tamaño de chunk en tokens para ingestión |
-| `CHUNK_OVERLAP` | `64` | Solapamiento entre chunks consecutivos |
-| `TOP_K` | `5` | Número de fragmentos recuperados en cada consulta RAG |
+| `MYAGENT_MODEL` | `qwen2.5-coder:14b` | Modelo Ollama completo (o alias) usado cuando no se pasa `-m` |
+| `QDRANT_URL` | `http://localhost:6333` | URL completa del servidor Qdrant |
+| `QDRANT_COLLECTION` | `myagent_docs` | Nombre de la colección de vectores |
+| `EMBEDDING_MODEL` | `nomic-embed-text` | Modelo de embeddings (via Ollama) |
+| `CHUNK_SIZE` | `768` | Tamaño de chunk en tokens para ingestión |
+| `CHUNK_OVERLAP` | `100` | Solapamiento entre chunks consecutivos |
+| `TOP_K` | `6` | Número de fragmentos recuperados en cada consulta RAG |
 
 ---
 
@@ -204,11 +216,10 @@ llm/
 ├── agent/
 │   ├── main.py                # Inicialización del agente Strands
 │   ├── config.py              # Mapa alias → modelo Ollama, defaults
-│   ├── tools/
-│   │   └── search.py          # Tools registradas con @tool (web, filesystem…)
+│   ├── tools.py               # Tools registradas con @tool (bash, filesystem, RAG)
 │   └── rag/
-│       ├── qdrant_rag.py      # Ingestión y consulta contra Qdrant
-│       └── embeddings.py      # Wrapper nomic-embed-text vía Ollama
+│       ├── base.py            # Interfaz abstracta RAGBackend
+│       └── qdrant_rag.py      # Ingestión y consulta contra Qdrant
 ├── docs/                      # Documentos de ejemplo para ingestar
 ├── docker-compose.yml         # Servicios opcionales: Qdrant, OpenWebUI
 ├── requirements.txt           # Dependencias Python (strands-agents, qdrant-client…)
