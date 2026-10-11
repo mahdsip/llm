@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Implement the core agent logic: RAG backends (base abstract class, FAISSBackend, QdrantBackend), Strands @tool functions, and the CLI main.py. Depends on FEAT-001 (agent/ package skeleton, config.py, requirements.txt must exist).",
+  "status": "pending",
+  "steps": [
+    "Create agent/rag/base.py: abstract class RAGBackend with abstract methods ingest(path: str) -> int (returns ingested doc count) and search(query: str, k: int = 6) -> list[str] (returns list of text chunk strings). Import ABC, abstractmethod from abc.",
+    "Create agent/rag/faiss_rag.py implementing FAISSBackend(RAGBackend). Constructor reads FAISS_INDEX_DIR from agent.config. Uses SentenceTransformer('all-MiniLM-L6-v2') for embeddings. ingest(path): walks directory recursively for .txt/.md/.py/.json files; reads text; splits into chunks of ~768 chars with 100-char overlap; encodes with sentence-transformers; builds faiss.IndexFlatL2(384); saves with faiss.write_index to FAISS_INDEX_DIR/index.faiss; saves chunks list as FAISS_INDEX_DIR/chunks.json; reuses sha256_file + load/save_manifest pattern from legacy/ragapi/ingest.py (copy the three helper functions). search(query, k): loads index + chunks.json; encodes query; calls index.search; returns top-k chunk strings. Handle missing index with a helpful RuntimeError.",
+    "Create agent/rag/qdrant_rag.py implementing QdrantBackend(RAGBackend). Constructor reads QDRANT_URL, QDRANT_COLLECTION, OLLAMA_HOST, EMBEDDING_MODEL from agent.config. ingest(path): replicates the LlamaIndex pipeline from legacy/ragapi/ingest.py — OllamaEmbedding(model_name=EMBEDDING_MODEL, base_url=OLLAMA_HOST), QdrantClient(url=QDRANT_URL), QdrantVectorStore, StorageContext, SentenceSplitter(chunk_size=768, chunk_overlap=100), VectorStoreIndex(nodes, storage_context). Also reuse sha256_file+manifest helpers. search(query, k): builds query engine via VectorStoreIndex.from_vector_store + as_query_engine(similarity_top_k=k, response_mode='no_text') and returns [node.node.get_content() for node in response.source_nodes] — raw chunks only, no LLM synthesis here.",
+    "Create agent/tools.py with three Strands @tool functions. Import `from strands import tool`. (1) bash_exec(command: str) -> str: runs command via subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30); returns stdout+stderr truncated to 4000 chars. Docstring in English for the LLM. (2) file_read(path: str) -> str: opens path, reads up to 50000 chars. (3) rag_search(query: str) -> str: imports agent.config to get RAG_BACKEND, instantiates FAISSBackend or QdrantBackend, calls search(query), returns '\\n\\n'.join(chunks). If no index exists returns a clear message.",
+    "Create agent/main.py. argparse setup: --model/-m (choices from MODELS keys + 'raw', default from MYAGENT_MODEL env), --raw-model (pass arbitrary ollama model name), --rag (bool flag, enable rag_search tool), --ingest DIR (path to ingest before starting), --list-models (print table and exit). Model resolution: if --model key is in MODELS dict, use MODELS[key]; else treat as raw model name. OllamaModel instantiation: OllamaModel(host=OLLAMA_HOST, model_id=resolved_model, temperature=0.7, keep_alive='10m'). Tool list: always [bash_exec, file_read]; add rag_search if --rag flag or RAG_BACKEND env != '' and != 'none'. System prompt in Spanish (adapted from legacy/agentsvc/main.py SYSTEM_PROMPT): introduce myagent, list tools, instruct to use rag_search for document queries. Agent instantiation: Agent(model=ollama_model, tools=tools, system_prompt=SYSTEM_PROMPT). If --ingest: instantiate backend, call ingest(args.ingest), print result count. Chat loop: print welcome banner with model name and active tools; while True: input('> '); if empty continue; if 'exit'/'quit' break; print(agent(user_input)); handle KeyboardInterrupt gracefully."
+  ],
+  "acceptance_criteria": [
+    "`python -c 'from agent.rag.base import RAGBackend'` succeeds",
+    "`python -c 'from agent.rag.faiss_rag import FAISSBackend'` succeeds (sentence-transformers + faiss-cpu installed)",
+    "`python -c 'from agent.rag.qdrant_rag import QdrantBackend'` succeeds (qdrant-client + llama-index installed)",
+    "`python -c 'from agent.tools import bash_exec, file_read, rag_search'` succeeds",
+    "`python -m agent.main --list-models` prints a table with qwen and deepseek rows and exits 0",
+    "./myagent --list-models prints the same table"
+  ],
+  "verification": [
+    "python -c 'from agent.rag.base import RAGBackend; from agent.rag.faiss_rag import FAISSBackend; from agent.rag.qdrant_rag import QdrantBackend; from agent.tools import bash_exec, file_read, rag_search; print(\"all imports OK\")'",
+    "python -m agent.main --list-models",
+    "./myagent --list-models"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

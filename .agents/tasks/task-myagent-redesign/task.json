@@ -1,0 +1,7 @@
+{
+  "task_id": "task-myagent-redesign",
+  "task_description": "Redesign the llm repo into myagent — a terminal-invocable shell script backed by Python (Strands Agents), Ollama (qwen2.5-coder:14b + deepseek-r1:32b), and swappable RAG backends (FAISS default, Qdrant optional). Replace LangChain+Docker architecture with a native CLI tool.",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}

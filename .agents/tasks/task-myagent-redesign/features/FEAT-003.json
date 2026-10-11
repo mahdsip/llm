@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-003",
+  "type": "docs",
+  "description": "Write the full README.md. Independent of FEAT-002 in content, but should be written last so it can reference the actual file paths and commands verified in the previous FEATs.",
+  "status": "pending",
+  "steps": [
+    "Write README.md at /home/mahdsip/Software/llm/README.md as a complete rewrite. Structure: (1) Header + one-line description. (2) Architecture diagram (text-art showing: user -> myagent shell script -> agent/main.py -> Strands Agent -> OllamaModel -> Ollama -> [qwen2.5-coder:14b | deepseek-r1:32b], with tools branch showing bash_exec/file_read/rag_search -> FAISSBackend|QdrantBackend). (3) Quick start section: install Ollama, run scripts/install.sh, run scripts/pull-models.sh, basic usage examples. (4) Model selection table: columns Model | Ollama tag | Speciality | When to use; rows for qwen2.5-coder:14b and deepseek-r1:32b. (5) React loop frameworks comparison table — 6 frameworks: Strands, LangChain, LangGraph, LlamaIndex (workflows), CrewAI, AutoGen; columns: React loop | Local LLM support | Tool calling | Complexity | License | Why chosen/not chosen for myagent. (6) RAG backends comparison table — FAISS vs Qdrant: columns Setup | Persistence | Server needed | Embedding model | Best for | How to enable. (7) Flash Attention section: explain Ollama auto-enables it when hardware supports it; env vars OLLAMA_FLASH_ATTENTION=1 (force on) and =0 (disable for unstable hardware like some AMD APUs). (8) Optional services section: docker compose --profile optional up qdrant / up openwebui. (9) Environment variables reference table. (10) Legacy section: link to legacy/ and explain it is the original Docker-based LangChain+Qdrant system."
+  ],
+  "acceptance_criteria": [
+    "README.md exists and contains all required sections: Quick start, Model selection table, React loop frameworks comparison table, RAG backends comparison table, Flash Attention section, Optional services, Environment variables, Legacy note",
+    "The React loop table has at least 5 frameworks including Strands",
+    "The RAG table has both FAISS and Qdrant rows",
+    "All code blocks in README use real commands that match the actual implementation"
+  ],
+  "verification": [
+    "grep -c '|' README.md (should be > 20 — confirms tables are present)",
+    "grep 'Strands' README.md",
+    "grep 'FAISS' README.md",
+    "grep 'deepseek-r1:32b' README.md"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
