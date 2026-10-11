@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "myagent"
+version = "0.1.0"
+description = "Agente conversacional local con React loop (Strands), Ollama y RAG intercambiable."
+requires-python = ">=3.11"
+# Las dependencias con versiones pinadas se gestionan en requirements.txt.
+# Este campo se deja vacío para no duplicar versiones.
+dependencies = []
+
+[project.scripts]
+myagent = "agent.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent*"]
