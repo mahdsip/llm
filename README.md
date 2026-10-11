@@ -1,147 +1,225 @@
-# Proyectos LLM
+# myagent
 
-> **⚠️ Repositorio en rediseño.** El proyecto local (`model-rag-local/`) ha sido renombrado a [`legacy/`](legacy/) y se conserva como referencia histórica. El nuevo sistema — un agente de terminal con React loop (Strands), selección de modelo (Qwen 14B / DeepSeek-R1-32B), RAG intercambiable (FAISS / Qdrant) y punto de entrada `./myagent` — está siendo construido sobre esa base. La documentación completa se actualizará al finalizar la reestructuración.
-
-Dos implementaciones de un sistema de pregunta-respuesta con recuperación de documentos (RAG), cada una con sus dos submódulos bien diferenciados:
-
-- **Módulo LLM** — interpreta la pregunta, decide si consultar los documentos, evalúa el contexto recuperado y elabora la respuesta final
-- **Módulo RAG** — genera embeddings, almacena vectores y recupera fragmentos relevantes; nunca produce lenguaje
+Agente LLM local interactivo en terminal: selección de modelo, React loop con Strands y RAG incremental con Qdrant, todo corriendo en tu propia máquina.
 
 ---
 
-## Proyecto 1 — Local
-
-**Repositorio:** [`model-rag-local/`](model-rag-local/)
-
-Despliegue completamente local sobre Linux sin GPU dedicada, usando contenedores Docker. Ningún dato sale al exterior: tanto el modelo de lenguaje como el de embeddings corren en la propia máquina vía Ollama.
-
-### Submódulo LLM — `agentsvc`
-
-`llama3.1:8b` corriendo en Ollama es el cerebro del sistema. Por cada pregunta:
-
-1. **Interpreta** la pregunta del usuario
-2. **Decide** si necesita buscar en los documentos locales (function calling con `search_rag`)
-3. Si sí, **lanza la consulta** al submódulo RAG
-4. **Evalúa** los fragmentos recuperados y los integra como contexto
-5. **Elabora** la respuesta final fundamentada en esos documentos
-
-LangChain orquesta este ciclo en `agentsvc`. Ollama sirve el modelo en la propia máquina, sin ninguna llamada a API externa.
-
-### Submódulo RAG — `ragapi`
-
-`ragapi` no genera lenguaje. Solo se encarga de:
-
-- Indexar los documentos locales con chunking configurable
-- Generar embeddings con `nomic-embed-text` (también en Ollama local)
-- Almacenar los vectores en Qdrant
-- Devolver únicamente fragmentos de texto ante consultas de similitud
-
-### Flujo
+## Arquitectura
 
 ```
-OpenWebUI → agentsvc → llama3.1:8b (interpreta + decide)
-                │
-                └──[search_rag]──► ragapi → Qdrant
-                                      │
-                ◄── fragmentos ────────┘
-                │
-                └──► llama3.1:8b (evalúa + responde)
-                │
-             Usuario
+./myagent (shell)
+    └── agent/main.py
+            └── Strands Agent  ← React loop
+                    └── OllamaModel
+                            ├── qwen2.5-coder:14b
+                            └── deepseek-r1:32b
+
+(lateral — opcional)
+    agent/rag/qdrant_rag.py
+            └── Qdrant  ← docker compose --profile optional up qdrant
 ```
 
-| | Tecnología |
-|---|---|
-| LLM | Ollama · `llama3.1:8b` · LangChain |
-| Embeddings | Ollama · `nomic-embed-text` |
-| Vector store | Qdrant |
-| Interfaz | OpenWebUI |
-
-**Detalles completos:** [`model-rag-local/README.md`](model-rag-local/README.md)
+El shell script `myagent` es el punto de entrada. Parsea argumentos, activa el entorno virtual y delega en `agent/main.py`. El agente Python ejecuta el React loop de Strands, llama a los tools definidos con `@tool` y, si se activa `--rag`, conecta con Qdrant para recuperación semántica.
 
 ---
 
-## Proyecto 2 — Nube (AWS)
+## Inicio rápido
 
-**Repositorio:** [github.com/mahdsip/familIA](https://github.com/mahdsip/familIA)
+### Prerrequisitos
 
-Despliegue en AWS (`eu-central-1`) enteramente con Terraform, sin servidores siempre encendidos. El acceso está autenticado con IAM/SigV4 y todos los datos van cifrados con una clave KMS propia.
+- [Ollama](https://ollama.com) ≥ 0.1.33
+- Python 3.11+
+- Docker (opcional — solo para Qdrant y OpenWebUI)
 
-### Submódulo LLM — Lambda `orchestrator`
+### Instalación
 
-Claude Haiku 4.5 (vía Bedrock, inference profile regional `eu`) actúa como cerebro. Por cada pregunta:
+```bash
+git clone <repo>
+cd llm
 
-1. **Clasifica** la intención: pregunta personal/familiar vs. conocimiento general
-2. **Auto-detecta** la persona y el tema a partir de un listado inyectado en el despliegue (sin nombres en el código)
-3. Si es personal, **consulta** el submódulo RAG con los filtros de persona/tema detectados
-4. **Evalúa** los fragmentos recuperados y genera una respuesta fundamentada con citas de fuente
-5. Si no encuentra nada en el RAG, **se detiene** — no inventa ni cae a conocimiento general
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-El punto de entrada es `POST /ask` en API Gateway, llamado desde una Raspberry Pi con OpenVoice vía proxy SigV4.
-
-### Submódulo RAG — Lambda `retriever` + Bedrock Knowledge Base
-
-La Lambda `retriever` no genera lenguaje. Solo se encarga de:
-
-- Indexar documentos subidos a S3 (con chunking jerárquico y parsing multimodal de PDFs e imágenes)
-- Generar embeddings con Titan Text Embeddings v2 (1024 dims, inmutables)
-- Almacenar los vectores en S3 Vectors (cifrado KMS)
-- Devolver únicamente fragmentos con metadatos (owner, topic, fecha, ruta S3) ante consultas del orchestrator
-
-La re-indexación es automática: se dispara por evento `ObjectCreated` en S3 y tiene un ciclo semanal de seguridad vía EventBridge.
-
-### Flujo
-
-```
-Raspberry Pi (OpenVoice)
-  │
-  └──[SigV4]──► API Gateway → Lambda orchestrator
-                                  │  (Haiku 4.5: clasifica + decide)
-                                  │
-                          pregunta personal
-                                  │
-                                  └──► Lambda retriever
-                                           │
-                                     Bedrock KB → S3 Vectors
-                                           │
-                    ◄── fragmentos + metadatos ┘
-                                  │
-                          Haiku 4.5 (evalúa + responde)
-                                  │
-                             Usuario
+chmod +x myagent
 ```
 
-**Flujo de ingestión:**
+### Descargar modelos
 
+```bash
+ollama pull qwen2.5-coder:14b
+ollama pull deepseek-r1:32b
+ollama pull nomic-embed-text   # necesario para RAG
 ```
-Documentos locales ──aws s3 sync──► S3 (KMS)
-  → evento ObjectCreated → Lambda auto_sync
-  → Bedrock StartIngestionJob → Titan v2 embeddings → S3 Vectors (KMS)
+
+### Uso
+
+```bash
+./myagent                              # menú interactivo
+./myagent -m qwen                      # Qwen2.5-Coder 14B
+./myagent -m deepseek                  # DeepSeek-R1 32B
+./myagent -m qwen --rag --ingest ./docs/   # con RAG
+./myagent --list-models
 ```
-
-| | Tecnología |
-|---|---|
-| LLM | Amazon Bedrock · Claude Haiku 4.5 |
-| Embeddings | Amazon Bedrock · Titan Text v2 · 1024 dims |
-| Vector store | S3 Vectors (KMS cifrado) |
-| Chunking | Jerárquico + parsing multimodal FM |
-| Infraestructura | Terraform · AWS Lambda · API Gateway · EventBridge |
-| Auth | IAM / SigV4 |
-
-**Detalles completos:** [github.com/mahdsip/familIA](https://github.com/mahdsip/familIA)
 
 ---
 
-## Comparativa
+## Modelos disponibles
 
-| | Local | Nube (AWS) |
+| Alias | Modelo Ollama | Parámetros | Uso recomendado |
+|---|---|---|---|
+| `qwen` | `qwen2.5-coder:14b` | 14 B | Código, depuración, scripts |
+| `deepseek` | `deepseek-r1:32b` | 32 B | Razonamiento complejo, análisis |
+
+Puedes añadir modelos adicionales editando `agent/config.py` sin modificar el script de entrada.
+
+---
+
+## Flash Attention
+
+Ollama gestiona Flash Attention automáticamente desde la versión 0.1.33. No existe ningún flag `--flash-attention` en `myagent` porque no es necesario: Ollama lo activa solo cuando detecta soporte en el hardware.
+
+**Cuándo se activa:**
+
+- GPU NVIDIA con CUDA (compute capability ≥ 8.0 recomendado, aunque funciona desde 7.x)
+- GPU AMD con ROCm
+- Apple Silicon con Metal
+
+**Variables de entorno para control manual:**
+
+| Variable | Valor | Efecto |
 |---|---|---|
-| **LLM** | Ollama `llama3.1:8b` | Bedrock Claude Haiku 4.5 |
-| **Embeddings** | `nomic-embed-text` (Ollama) | Bedrock Titan Text v2 · 1024 dims |
-| **Vector store** | Qdrant | S3 Vectors (KMS) |
-| **Chunking** | LlamaIndex configurable | Jerárquico + parsing FM |
-| **Orquestación LLM** | LangChain · `agentsvc` | Lambda `orchestrator` |
-| **Orquestación RAG** | LlamaIndex · `ragapi` | Lambda `retriever` + Bedrock KB |
-| **Auth** | Red local | IAM / SigV4 |
-| **Coste** | 0 € (hardware propio) | Pay-per-use |
-| **Privacidad** | Total — ningún dato sale | Datos en AWS · KMS CMK |
+| `OLLAMA_FLASH_ATTENTION` | `1` | Fuerza Flash Attention aunque Ollama no lo detecte |
+| `OLLAMA_FLASH_ATTENTION` | `0` | Desactiva Flash Attention explícitamente |
+
+Si tu GPU lo soporta y no ves mejora, prueba `OLLAMA_FLASH_ATTENTION=1 ./myagent -m deepseek`.
+
+---
+
+## React loop — comparativa de frameworks
+
+| Framework | Loop nativo | Soporte Ollama | Complejidad setup | Licencia | Observaciones |
+|---|---|---|---|---|---|
+| **Strands Agents** | ✅ ReAct built-in | ✅ nativo | Baja | Apache-2.0 | `@tool` decorator, mínimas dependencias |
+| LangGraph | ✅ grafo de estados | ✅ via LangChain | Media | MIT | Muy potente, verboso para casos simples |
+| LlamaIndex Workflows | ✅ event-driven | ✅ | Media | MIT | Buena integración con RAG propio |
+| CrewAI | ✅ multi-agente | ✅ | Media | MIT | Orientado a equipos de agentes, overhead innecesario en single-agent |
+| AutoGen | ✅ multi-agente | ⚠️ via adaptador | Alta | MIT | Microsoft; excesivo para un agente local |
+| DSPy | ❌ no loop nativo | ⚠️ | Alta | MIT | Optimización de prompts, no orquestación de agentes |
+
+**Por qué Strands:** soporte nativo de Ollama sin capas de abstracción extra, decorador `@tool` para registrar herramientas con una línea, dependencias mínimas (no arrastra LangChain ni LlamaIndex), y licencia Apache-2.0 compatible con uso privado y comercial. Para un agente de terminal single-model es la opción con menor fricción.
+
+---
+
+## RAG con Qdrant
+
+### Por qué Qdrant
+
+Qdrant ofrece upserts incrementales: cuando un documento cambia, solo ese chunk se re-ingest, sin tocar el resto del índice. Esto encaja con colecciones de documentos que evolucionan (notas, código fuente, documentación viva).
+
+### Por qué no FAISS
+
+**FAISS y documentos dinámicos:** FAISS almacena el índice en ficheros binarios planos. Cuando un documento cambia, es necesario reconstruir el índice completo (no hay upserts parciales). Para colecciones de documentos que cambian con frecuencia esto es costoso en tiempo y cómputo. Qdrant, en cambio, soporta upserts incrementales — solo los documentos nuevos o modificados necesitan ser re-ingestados.
+
+### Arrancar Qdrant
+
+```bash
+docker compose --profile optional up qdrant
+```
+
+El servicio queda disponible en `http://localhost:6333`. La UI de administración está en `http://localhost:6333/dashboard`.
+
+### Ingestar documentos
+
+```bash
+./myagent --ingest ./docs/ -m qwen --rag
+```
+
+El flag `--ingest` recorre el directorio, genera chunks, crea embeddings con `nomic-embed-text` (descargado automáticamente si no está) y los almacena en Qdrant. Las ejecuciones sucesivas solo actualizan los documentos modificados.
+
+### Modelo de embeddings
+
+`nomic-embed-text` vía Ollama. Se descarga automáticamente en el primer `--ingest` si no está disponible. Dimensión: 768. No requiere GPU (funciona en CPU con velocidad aceptable).
+
+---
+
+## Comparativa de backends RAG
+
+| Backend | Tipo | Persistencia | Ingest incremental | Servidor requerido | Escalabilidad | Licencia | Cuándo usarlo |
+|---|---|---|---|---|---|---|---|
+| **FAISS** | In-process | Ficheros binarios | ❌ rebuild completo | No | Millones de vecs (estático) | MIT | Colecciones estáticas, prototipado rápido |
+| **Qdrant** | Server/Docker | Base de datos | ✅ upserts | Sí (Docker) | Alta, filtrado avanzado | Apache-2.0 | **Este proyecto** — docs dinámicos |
+| **ChromaDB** | In-process/Server | SQLite/servidor | ✅ | Opcional | Media | Apache-2.0 | Prototipado, fácil setup |
+| **Milvus** | Server | Base de datos | ✅ | Sí (pesado) | Muy alta | Apache-2.0 | Producción a gran escala |
+| **pgvector** | PostgreSQL ext | PostgreSQL | ✅ | Sí (Postgres) | Media-alta | PostgreSQL License | Ya tienes Postgres en tu stack |
+| **LanceDB** | In-process | Ficheros Lance | ✅ | No | Alta | Apache-2.0 | Alternativa moderna a FAISS con upserts |
+
+**Recomendación:** para este proyecto (documentos que cambian) se eligió Qdrant por sus upserts incrementales y su filtrado avanzado por metadatos. Si no quieres levantar un servidor Docker, LanceDB es la mejor alternativa a FAISS con soporte de upserts y sin proceso externo.
+
+---
+
+## Servicios opcionales
+
+Los servicios opcionales (Qdrant y OpenWebUI) están definidos en `docker-compose.yml` bajo el perfil `optional`, de forma que `docker compose up` sin argumentos no los arranca.
+
+```bash
+# Solo Qdrant
+docker compose --profile optional up qdrant
+
+# Solo OpenWebUI
+docker compose --profile optional up openwebui
+
+# Ambos
+docker compose --profile optional up
+```
+
+OpenWebUI queda disponible en `http://localhost:3000` y se conecta automáticamente al servidor Ollama local.
+
+---
+
+## Variables de entorno
+
+Crea un fichero `.env` en la raíz del proyecto. Todas las variables son opcionales; los valores por defecto funcionan para un uso estándar.
+
+| Variable | Por defecto | Descripción |
+|---|---|---|
+| `OLLAMA_HOST` | `http://localhost:11434` | URL del servidor Ollama |
+| `OLLAMA_FLASH_ATTENTION` | _(no definida)_ | `1` para forzar Flash Attention, `0` para desactivarla |
+| `DEFAULT_MODEL` | `qwen` | Alias del modelo usado cuando no se pasa `-m` |
+| `QDRANT_HOST` | `localhost` | Host donde corre Qdrant |
+| `QDRANT_PORT` | `6333` | Puerto gRPC/HTTP de Qdrant |
+| `QDRANT_COLLECTION` | `myagent` | Nombre de la colección de vectores |
+| `EMBED_MODEL` | `nomic-embed-text` | Modelo de embeddings (via Ollama) |
+| `CHUNK_SIZE` | `512` | Tamaño de chunk en tokens para ingestión |
+| `CHUNK_OVERLAP` | `64` | Solapamiento entre chunks consecutivos |
+| `TOP_K` | `5` | Número de fragmentos recuperados en cada consulta RAG |
+
+---
+
+## Estructura del proyecto
+
+```
+llm/
+├── myagent                    # Punto de entrada: shell script
+├── agent/
+│   ├── main.py                # Inicialización del agente Strands
+│   ├── config.py              # Mapa alias → modelo Ollama, defaults
+│   ├── tools/
+│   │   └── search.py          # Tools registradas con @tool (web, filesystem…)
+│   └── rag/
+│       ├── qdrant_rag.py      # Ingestión y consulta contra Qdrant
+│       └── embeddings.py      # Wrapper nomic-embed-text vía Ollama
+├── docs/                      # Documentos de ejemplo para ingestar
+├── docker-compose.yml         # Servicios opcionales: Qdrant, OpenWebUI
+├── requirements.txt           # Dependencias Python (strands-agents, qdrant-client…)
+├── .env.example               # Plantilla de variables de entorno
+├── legacy/                    # Proyecto anterior (model-rag-local renombrado)
+│   └── README.md
+└── README.md                  # Este fichero
+```
+
+---
+
+## Legacy
+
+El directorio [`legacy/`](legacy/) contiene el proyecto original `model-rag-local` — un stack Docker completo con LangChain, `agentsvc`, `ragapi` y OpenWebUI sobre `llama3.1:8b`. Se conserva como referencia histórica y no recibe mantenimiento activo.
