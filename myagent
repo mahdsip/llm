@@ -1,13 +1,39 @@
 #!/usr/bin/env bash
 # myagent — Punto de entrada del agente conversacional local
+#
+# Uso:
+#   myagent                          # modelo por defecto (qwen2.5-coder:14b)
+#   myagent -m deepseek              # DeepSeek-R1-32B
+#   myagent -m qwen --rag            # Qwen con RAG (requiere Qdrant)
+#   myagent --ingest ~/docs --rag    # Ingestar docs y arrancar con RAG
+#   myagent --list-models            # Ver modelos disponibles
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Añade la raíz del proyecto al PYTHONPATH para que `python -m agent.main` funcione
+# ---- Verificar que Ollama está en marcha --------------------------
+# --help y --list-models no necesitan Ollama
+_needs_ollama=true
+for arg in "$@"; do
+    case "$arg" in --help|-h|--list-models) _needs_ollama=false; break ;; esac
+done
+
+if $_needs_ollama && ! curl -s http://localhost:11434 >/dev/null 2>&1; then
+    echo "[myagent] ERROR: Ollama no está en marcha." >&2
+    echo "[myagent] Arráncalo con:  ollama serve" >&2
+    exit 1
+fi
+
+# ---- Activar virtualenv si existe ---------------------------------
+if [ -f "$SCRIPT_DIR/.venv/bin/activate" ]; then
+    # shellcheck source=/dev/null
+    source "$SCRIPT_DIR/.venv/bin/activate"
+fi
+
+# ---- Añadir la raíz del proyecto al PYTHONPATH --------------------
 export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
-# Carga variables de entorno desde .env si existe
+# ---- Cargar variables de entorno desde .env si existe -------------
 if [ -f "$SCRIPT_DIR/.env" ]; then
     # shellcheck source=/dev/null
     set -o allexport
@@ -15,4 +41,5 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +o allexport
 fi
 
-exec python -m agent.main "$@"
+PYTHON="$(command -v python3 || command -v python)"
+exec "$PYTHON" -m agent.main "$@"
