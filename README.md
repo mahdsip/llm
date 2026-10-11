@@ -1,5 +1,7 @@
 # Proyectos LLM
 
+> **⚠️ Repositorio en rediseño.** El proyecto local (`model-rag-local/`) ha sido renombrado a [`legacy/`](legacy/) y se conserva como referencia histórica. El nuevo sistema — un agente de terminal con React loop (Strands), selección de modelo (Qwen 14B / DeepSeek-R1-32B), RAG intercambiable (FAISS / Qdrant) y punto de entrada `./myagent` — está siendo construido sobre esa base. La documentación completa se actualizará al finalizar la reestructuración.
+
 Dos implementaciones de un sistema de pregunta-respuesta con recuperación de documentos (RAG), cada una con sus dos submódulos bien diferenciados:
 
 - **Módulo LLM** — interpreta la pregunta, decide si consultar los documentos, evalúa el contexto recuperado y elabora la respuesta final
