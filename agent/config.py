@@ -39,3 +39,10 @@ QDRANT_COLLECTION: str = os.getenv("QDRANT_COLLECTION", "myagent_docs")
 
 # Modelo de embeddings servido por Ollama
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
+
+# ---------------------------------------------------------------------------
+# Configuración de ingestión RAG
+# ---------------------------------------------------------------------------
+CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "768"))
+CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "100"))
+TOP_K: int = int(os.getenv("TOP_K", "6"))

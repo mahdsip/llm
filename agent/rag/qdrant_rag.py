@@ -20,21 +20,23 @@ from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 
 from agent.config import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
     EMBEDDING_MODEL,
     MYAGENT_MODEL,
     OLLAMA_HOST,
     QDRANT_COLLECTION,
     QDRANT_URL,
+    TOP_K,
 )
 from agent.rag.base import RAGBackend
 
 log = logging.getLogger(__name__)
 
-# Directorio donde se persiste el manifiesto SHA-256
-_MANIFEST_PATH = Path(".rag_index/qdrant_manifest.json")
-
-CHUNK_SIZE = 768
-CHUNK_OVERLAP = 100
+# Directorio donde se persiste el manifiesto SHA-256 — anclado a la raíz
+# del proyecto para que el path sea correcto independientemente del
+# directorio de trabajo desde el que se invoque myagent.
+_MANIFEST_PATH = Path(__file__).parent.parent.parent / ".rag_index" / "qdrant_manifest.json"
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +209,7 @@ class QdrantBackend(RAGBackend):
     # search
     # ------------------------------------------------------------------
 
-    def search(self, query: str, k: int = 6) -> list[str]:
+    def search(self, query: str, k: int = TOP_K) -> list[str]:
         """Recupera los *k* fragmentos de texto más relevantes para *query*.
 
         Returns:
