@@ -177,6 +177,55 @@ OpenWebUI queda disponible en `http://localhost:3000` y se conecta automáticame
 
 ---
 
+## RAG como microservicio HTTP (alternativa no utilizada)
+
+### ¿Qué es el enfoque de microservicio RAG?
+
+En lugar de llamar al RAG directamente como librería Python, existe un patrón alternativo que consiste en exponer el RAG como una API HTTP independiente (FastAPI) que el agente consulta por red. Este era el enfoque del directorio `model-rag-local/ragapi/`.
+
+### Arquitectura comparada
+
+```
+# Enfoque actual (librería directa)
+[myagent (Strands)] ──import──> [QdrantBackend] ──> [Qdrant :6333]
+
+# Enfoque microservicio
+[myagent (Strands)] ──HTTP POST /query──> [ragapi (FastAPI :8000)] ──> [Qdrant :6333]
+```
+
+### Ventajas del microservicio
+
+- Múltiples agentes o aplicaciones pueden compartir el mismo índice RAG sin duplicar lógica
+- El servicio RAG puede escalarse independientemente del agente
+- Permite exponer el RAG a aplicaciones externas (web, móvil, otros servicios)
+- Aislamiento de fallos: si el RAG falla, el agente puede degradarse graciosamente
+- Posibilidad de cachear respuestas HTTP
+
+### Inconvenientes del microservicio
+
+- Requiere un container Docker adicional (más infraestructura para una herramienta de terminal)
+- Latencia de red añadida en cada búsqueda (aunque es localhost)
+- El LLM está duplicado: LlamaIndex usa un LLM para generar la respuesta RAG, y Strands usa otro para el agente
+- Mayor complejidad operacional: hay que gestionar el ciclo de vida de otro servicio
+- Para un uso personal en terminal, la API HTTP no aporta valor real
+
+### Por qué no lo usamos
+
+- `myagent` es una herramienta de terminal con un único consumidor (el propio agente)
+- No hay necesidad de compartir el índice RAG con otras aplicaciones
+- Añadir un microservicio HTTP entre el agente y Qdrant sería complejidad sin beneficio
+- El diseño de librería directa es más simple, más rápido y suficiente para el caso de uso
+
+### Cuándo tendría sentido usarlo
+
+- Si otros servicios (web, API pública, OpenWebUI) necesitan acceder al mismo índice RAG
+- En entornos de producción con múltiples consumidores
+- Si se quiere exponer el RAG como servicio independiente con su propio ciclo de vida
+
+Referencia: el código de ejemplo del microservicio está disponible en `model-rag-local/ragapi/`.
+
+---
+
 ## Seguridad — advertencia sobre `bash_exec`
 
 El agente dispone de la herramienta `bash_exec`, que puede ejecutar cualquier comando de shell con los permisos del usuario que invoca `myagent`. El agente decide de forma autónoma qué comandos ejecutar en función de la conversación.
