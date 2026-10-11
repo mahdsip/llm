@@ -40,7 +40,7 @@ _MANIFEST_PATH = Path(__file__).parent.parent.parent / ".rag_index" / "qdrant_ma
 
 
 # ---------------------------------------------------------------------------
-# Helpers de manifiesto (patrón de legacy/ragapi/ingest.py)
+# Helpers de manifiesto (gestión de cambios incrementales por SHA-256)
 # ---------------------------------------------------------------------------
 
 def _sha256_file(path: Path) -> str:
