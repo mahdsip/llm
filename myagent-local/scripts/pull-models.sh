@@ -9,6 +9,12 @@ echo "[pull-models] qwen2.5-coder:14b listo."
 ollama pull deepseek-r1:32b
 echo "[pull-models] deepseek-r1:32b listo."
 
+ollama pull glm4:9b
+echo "[pull-models] glm4:9b listo."
+
+# Descomenta la siguiente línea si tienes 16+ GB de VRAM
+# ollama pull glm-4.7-flash
+
 echo "[pull-models] Descargando modelo de embeddings para RAG ..."
 ollama pull nomic-embed-text
 echo "[pull-models] nomic-embed-text listo."
