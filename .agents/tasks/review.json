@@ -1,5 +1,11 @@
 {
   "verdict": "APPROVED",
-  "issues": [],
+  "issues": [
+    "Conexión Qdrant por llamada en rag_search — QdrantBackend se instancia en cada invocación del tool, abriendo un nuevo QdrantClient por query. Instanciar el backend una vez en main() y capturarlo en el closure del tool.",
+    "bash_exec sin confirmación del usuario — el agente ejecuta shell arbitrario de forma autónoma. Considerar un modo --safe que pida confirmación antes de subprocess.run, especialmente con documentos de terceros ingestados.",
+    "Chunks obsoletos no se purgan en Qdrant — al actualizar un fichero, los vectores de la versión anterior quedan en la colección indefinidamente. Añadir un paso de borrado por source_path antes de re-indexar.",
+    "Dependencia implícita de curl en el shell script — la verificación de Ollama falla sin mensaje útil si curl no está en el PATH. Añadir preflight con command -v curl o implementar el check en Python.",
+    "Temperatura fija no configurable para DeepSeek-R1 — temperature=0.7 está hardcodeada. DeepSeek-R1 funciona mejor con 0.1-0.3. Exponer MYAGENT_TEMPERATURE en config.py y .env.example."
+  ],
   "reviewDoc": ".agents/tasks/review.md"
 }

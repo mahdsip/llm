@@ -1,8 +1,8 @@
-# myagent — Agente LLM local con Strands, Ollama y RAG Qdrant
+# myagent — agente conversacional local con React loop y RAG incremental
 
-Rediseño completo del repositorio: reemplaza el stack Docker legacy (LangChain + agentsvc + ragapi) por un script de terminal que arranca un agente Python con React loop sobre Ollama. El punto de entrada es un shell script `myagent` que delega en `agent/main.py`, que a su vez instancia un `Agent` de Strands con `OllamaModel` y las herramientas declaradas con `@tool`. El RAG usa exclusivamente Qdrant con ingestión incremental vía SHA-256; FAISS fue descartado de forma explícita y documentada en código, comentarios, README y `.env.example`. El README está en español e incluye todas las secciones comparativas requeridas con los recuentos mínimos de filas.
+Esta implementación reescribe el repositorio desde cero sobre un nuevo stack: shell script `myagent` como punto de entrada, agente Strands con React loop sobre Ollama, y RAG incremental contra Qdrant. El objetivo del rediseño era eliminar la dependencia de Docker para el flujo principal, simplificar la selección de modelos desde la terminal, y construir un pipeline RAG que soporte actualizaciones de documentos sin reconstruir el índice completo. Los servicios Docker (Qdrant, OpenWebUI) son estrictamente opcionales y no arrancan con `docker compose up` a secas.
 
-**Watch for:** `bash_exec` ejecuta con `shell=True` sin sandboxing — documentado correctamente en el README, aceptable para uso local; a tener en cuenta si el uso evoluciona. Ningún bloqueante encontrado.
+Watch for: `bash_exec` ejecuta shell arbitrario con los permisos del usuario — el README lo advierte, pero no hay ningún mecanismo de confirmación en tiempo de ejecución. La herramienta `rag_search` instancia `QdrantBackend` en cada llamada, creando una conexión nueva al cliente Qdrant por query; en conversaciones largas con RAG activo esto acumula conexiones sin reutilización. El flag `--help` lo gestiona argparse implícitamente, pero el shell script solo corta la verificación de Ollama para `-h/--help`; si argparse añade algún alias en el futuro podría fallar silenciosamente el check.
 
 **Verdict**: APPROVED
 
@@ -10,71 +10,83 @@ Rediseño completo del repositorio: reemplaza el stack Docker legacy (LangChain 
 
 ## High-level view
 
-El checklist de la revisión anterior tenía 7 issues bloqueantes; todos están resueltos en esta versión. El README ahora documenta `MYAGENT_MODEL`, `QDRANT_URL` y `EMBEDDING_MODEL` — los nombres exactos que lee `config.py`. `CHUNK_SIZE`, `CHUNK_OVERLAP` y `TOP_K` se leen con `os.getenv` desde `config.py` con sus defaults documentados. El árbol de directorios del README refleja la estructura real (`agent/tools.py`, no `agent/tools/search.py`).
+El shell script actúa como un thin wrapper: comprueba que Ollama esté en marcha (salvo para `--help` y `--list-models`), activa el virtualenv si existe, y delega todo el parsing de argumentos a `agent/main.py` vía `python -m`. El diseño evita duplicar lógica entre bash y Python.
 
-`_MANIFEST_PATH` está anclado a la raíz del proyecto vía `Path(__file__).parent.parent.parent`, lo que garantiza que el manifiesto SHA-256 se localiza correctamente independientemente del directorio de trabajo desde el que se invoque `myagent`. El README incluye una sección dedicada de advertencia de seguridad sobre `bash_exec`.
+El agente usa `OllamaModel` de Strands directamente, sin capas LangChain. Los tools `bash_exec`, `file_read` y `rag_search` se registran con `@tool` y solo se cargan cuando son necesarios: `rag_search` no se importa si `--rag` no está activo, lo que evita conectarse a Qdrant en arranques normales.
 
-Los dos modelos requeridos (Qwen2.5-Coder 14B y DeepSeek-R1 32B) están mapeados en `config.py` con sus aliases. Los flags `--help`, `--model`/`-m`, `--rag`, `--ingest` y `--list-models` están implementados y documentados. Ambos servicios Docker tienen `profiles: [optional]` y `faiss-cpu` no aparece en ningún fichero del repositorio.
+El backend RAG hereda de una interfaz abstracta `RAGBackend`, pero solo existe una implementación (Qdrant). La elección de Qdrant sobre FAISS está justificada en el código, en el README y en `requirements.txt`: colecciones dinámicas con upserts incrementales frente a reconstrucción completa del índice. El manifiesto SHA-256 persiste en `.rag_index/qdrant_manifest.json` y permite saltarse ficheros no modificados entre ejecuciones de `--ingest`.
+
+El `docker-compose.yml` define ambos servicios opcionales (Qdrant y OpenWebUI) bajo el perfil `optional`, de modo que `docker compose up` sin argumentos no arranca ninguno. Flash Attention no se expone como flag porque Ollama lo gestiona automáticamente desde v0.1.33; el README documenta `OLLAMA_FLASH_ATTENTION` para control manual.
 
 ---
 
 <details>
-<summary>Issues (0)</summary>
+<summary>Issues (5)</summary>
 
-No hay issues pendientes. Todos los issues del pase anterior han sido resueltos.
+1. **Conexión Qdrant por llamada en rag_search** — `QdrantBackend` se instancia dentro de `rag_search` en cada invocación del tool, abriendo un nuevo `QdrantClient` por query. En conversaciones largas con RAG activo esto acumula conexiones sin reutilización. El backend debería instanciarse una vez en `main()` y capturarse en el closure del tool o pasarse vía `functools.partial`.
+
+2. **bash_exec sin confirmación del usuario** — El agente puede ejecutar cualquier comando de shell de forma autónoma. Considerar un modo `--safe` que muestre el comando y pida confirmación antes de `subprocess.run`, especialmente relevante si el agente procesa ficheros de terceros ingestados con `--ingest`.
+
+3. **Chunks obsoletos no se purgan en Qdrant** — Al actualizar un fichero, los vectores de la versión anterior (identificados por el sha viejo) quedan en la colección indefinidamente. En colecciones que evolucionan mucho, los vectores huérfanos se acumulan. Añadir un paso de borrado por `source_path` antes de re-indexar un fichero modificado.
+
+4. **Dependencia implícita de curl en el shell script** — La verificación de Ollama falla sin mensaje útil si `curl` no está en el PATH. Añadir un preflight `command -v curl` o implementar el check en Python para eliminar la dependencia.
+
+5. **Temperatura fija no configurable para DeepSeek-R1** — `temperature=0.7` está hardcodeada para todos los modelos. DeepSeek-R1 funciona mejor con 0.1-0.3. Exponer `MYAGENT_TEMPERATURE` como variable de entorno en `config.py` y `.env.example`.
 
 </details>
 
 ---
 
 <details>
-<summary>Details</summary>
+<summary>Detalles</summary>
 
-## Estado de los issues del pase anterior
+### Shell script: dependencia de curl y exposición de .env
 
-**Issue 1 — Estructura de directorios incorrecta en README**: resuelto (confirmed). El árbol del README ahora muestra `agent/tools.py` directamente, sin el subdirectorio `agent/tools/` ni el fichero `embeddings.py` inexistentes.
+La verificación de Ollama usa `curl -s http://localhost:11434` — si `curl` no está en el PATH del sistema (entornos minimalistas, algunos contenedores), el script falla con un error poco descriptivo antes de activar el virtualenv. Un preflight con `command -v curl` o una alternativa con `python3 -c "import urllib.request..."` sería más robusto.
 
-**Issue 2 — Variable `DEFAULT_MODEL` sin efecto**: resuelto (confirmed). La tabla de variables de entorno del README ahora documenta `MYAGENT_MODEL`, que es el nombre exacto que lee `config.py`.
+La carga de `.env` con `set -o allexport` + `source` expone todas las variables del fichero como variables de entorno del proceso Python hijo. Si `.env` contiene variables con nombres que colisionen con variables del sistema (`PATH`, `HOME`, `USER`), podría causar problemas silenciosos. El patrón más seguro sería usar `python-dotenv` exclusivamente (ya lo hace `config.py`) y eliminar la carga desde bash.
 
-**Issue 3 — `QDRANT_HOST`/`QDRANT_PORT` en lugar de `QDRANT_URL`**: resuelto (confirmed). El README documenta `QDRANT_URL` como URL completa, alineado con `config.py`.
+### Temperatura fija para DeepSeek-R1
 
-**Issue 4 — `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K` hardcodeados**: resuelto (confirmed). `config.py` los lee con `os.getenv` con defaults `768`, `100` y `6` respectivamente, y el README los documenta con esos valores por defecto.
+El agente se instancia con `temperature=0.7` para todos los modelos. Para DeepSeek-R1 (modelo de razonamiento con cadenas `<think>`), un valor de 0.1-0.3 produce razonamientos más consistentes. La temperatura no está expuesta como variable de entorno ni como flag, así que el único ajuste posible hoy es editar `main.py` directamente. Añadir `MYAGENT_TEMPERATURE` a `config.py` y a `.env.example` sería un cambio de una línea.
 
-**Issue 5 — `EMBED_MODEL` vs `EMBEDDING_MODEL`**: resuelto (confirmed). El README documenta `EMBEDDING_MODEL`, alineado con `config.py`.
+### RAG: manifest SHA-256 e identificadores de chunk
 
-**Issue 6 — `bash_exec` sin advertencia de seguridad**: resuelto (confirmed). El README tiene una sección "Seguridad — advertencia sobre `bash_exec`" que explica el alcance de lo que el agente puede ejecutar y advierte de no usarlo en entornos compartidos.
+El path del manifiesto está anclado a la raíz del proyecto con `Path(__file__).parent.parent.parent`, lo que funciona correctamente independientemente del directorio de trabajo. Los chunks se identifican por `{sha256}:{chunk_index}`: cuando un fichero cambia, su nuevo sha produce IDs distintos, pero los IDs viejos permanecen en Qdrant — no hay lógica de borrado de chunks obsoletos. En colecciones que evolucionan mucho, los vectores huérfanos de versiones anteriores se acumulan sin nunca ser purgados.
 
-**Issue 7 — Manifiesto relativo al directorio de trabajo**: resuelto (confirmed). `_MANIFEST_PATH = Path(__file__).parent.parent.parent / ".rag_index" / "qdrant_manifest.json"` ancla la ruta a la raíz del proyecto. El comentario en el código explica el motivo.
+### Conexión Qdrant por llamada (confirmed)
 
-## Verificación del checklist completo
+En `tools.py`, `rag_search` instancia `QdrantBackend(...)` en cada invocación del tool. `QdrantBackend.__init__` no abre conexión, pero `search()` llama a `_client_and_store()` que crea `QdrantClient(url=...)` y `QdrantVectorStore(...)` en cada llamada. El cliente `qdrant-client` tiene pooling interno, pero crear un nuevo objeto `QdrantClient` por query no es el patrón recomendado y puede generar overhead de handshake en conversaciones largas. El fix natural sería instanciar el backend una sola vez en `main()` y capturarlo en el closure del tool o usar `functools.partial`.
 
-- **Shell script con `--help`, `--model`, `--rag`, `--ingest`**: todos los flags están implementados en `agent/main.py` con argparse; `--help` es manejado automáticamente por argparse; el shell script excluye `--help` de la verificación de Ollama.
-- **React loop Strands con OllamaModel**: `Agent(model=OllamaModel(...), tools=tools)` en `main.py`; el React loop es nativo de Strands.
-- **RAG solo Qdrant**: no hay importaciones ni dependencias de FAISS en ningún fichero bajo `agent/`; `requirements.txt` no incluye `faiss-cpu`.
-- **README en español con ≥5 filas en tabla React loop**: 6 filas (Strands, LangGraph, LlamaIndex Workflows, CrewAI, AutoGen, DSPy).
-- **README con ≥5 filas en tabla RAG con FAISS, Qdrant, ChromaDB**: 6 filas (FAISS, Qdrant, ChromaDB, Milvus, pgvector, LanceDB).
-- **Sección explicando por qué no FAISS**: presente en `## RAG con Qdrant > ### Por qué no FAISS`.
-- **Sección Flash Attention**: presente como `## Flash Attention`.
-- **`profiles: [optional]` en ambos servicios**: qdrant y openwebui tienen `profiles: [optional]` en `docker-compose.yml`.
-- **No `faiss-cpu` en `requirements.txt`**: confirmado.
+### bash_exec: superficie de ataque (confirmed)
+
+`bash_exec` ejecuta `subprocess.run(command, shell=True, ...)` con los permisos del proceso `myagent`. El timeout de 30 s y el truncado a 4000 caracteres limitan el impacto de salidas masivas o bucles, pero no la ejecución en sí. El riesgo se amplifica si el usuario ingest a documentos de terceros con `--ingest`: un documento podría contener instrucciones que el LLM interprete como comandos a ejecutar (prompt injection → shell execution).
+
+### Cobertura de tests
+
+No existe directorio `tests/` ni ficheros de test. Para un proyecto de esta naturaleza (herramienta personal), la ausencia de tests formales es comprensible, pero las rutas críticas sin cobertura son:
+
+- El parsing de argumentos y la resolución de alias de modelo en `_resolve_model`.
+- La lógica de manifiesto SHA-256 en `qdrant_rag.py` (skip de ficheros no modificados, actualización tras cambio).
+- El comportamiento de `rag_search` cuando Qdrant no está disponible (actualmente propagaría la excepción del cliente hasta el agente sin captura).
 
 </details>
 
 ---
 
 <details>
-<summary>Ficheros revisados</summary>
+<summary>Mapa de ficheros</summary>
 
-| Fichero | Qué hace |
+| Fichero | Cambio |
 |---|---|
-| `myagent` | Shell script de entrada; parsea flags, arranca venv, delega en Python |
-| `agent/main.py` | CLI con argparse; instancia Strands Agent con OllamaModel y tools |
-| `agent/config.py` | Constantes y lectura de env vars con os.getenv (MYAGENT_MODEL, QDRANT_URL, EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP, TOP_K) |
-| `agent/tools.py` | `@tool` bash_exec, file_read, rag_search |
-| `agent/rag/qdrant_rag.py` | Ingestión incremental SHA-256 + búsqueda semántica sobre Qdrant; manifiesto anclado a raíz del proyecto |
-| `agent/rag/base.py` | Interfaz abstracta RAGBackend |
-| `docker-compose.yml` | Servicios qdrant y openwebui, ambos con `profiles: [optional]` |
-| `requirements.txt` | strands-agents[ollama], qdrant-client, llama-index-*, rich; sin faiss-cpu |
-| `README.md` | Documentación en español; tablas React loop (6 filas) y RAG (6 filas); sección "Por qué no FAISS"; sección Flash Attention; variables de entorno alineadas con config.py |
+| `myagent` | Shell script nuevo — entrypoint, verificación Ollama, activación de venv |
+| `agent/main.py` | CLI con argparse, inicialización de Strands Agent, loop conversacional |
+| `agent/config.py` | Constantes centrales: alias de modelos, URLs de servicios, parámetros RAG |
+| `agent/tools.py` | Tools `bash_exec`, `file_read`, `rag_search` con decorador `@tool` |
+| `agent/rag/base.py` | Interfaz abstracta `RAGBackend` |
+| `agent/rag/qdrant_rag.py` | Backend Qdrant con ingestión incremental SHA-256 y búsqueda semántica |
+| `requirements.txt` | Dependencias Python: strands-agents, qdrant-client, llama-index, rich |
+| `docker-compose.yml` | Servicios opcionales Qdrant y OpenWebUI bajo perfil `optional` |
+| `README.md` | Documentación en español con tablas comparativas de frameworks y backends RAG |
 
 </details>
