@@ -23,6 +23,8 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"),
 MODELS: dict[str, str] = {
     "qwen": "qwen2.5-coder:14b",
     "deepseek": "deepseek-r1:32b",
+    "glm": "glm4:9b",            # 9B denso, ~6 GB VRAM (Q4) — recomendado
+    "glm-flash": "glm-4.7-flash", # MoE 30B-A3B, ~16 GB VRAM — hardware potente
 }
 
 # ---------------------------------------------------------------------------

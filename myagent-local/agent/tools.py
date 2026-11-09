@@ -77,6 +77,63 @@ def file_read(path: str) -> str:
 
 
 @tool
+def file_write(path: str, content: str) -> str:
+    """Escribe o sobreescribe el contenido completo de un fichero.
+
+    Crea el fichero y los directorios padre si no existen.
+    ADVERTENCIA: sobreescribe sin confirmación. Úsalo solo cuando el usuario
+    haya pedido explícitamente crear o modificar un fichero.
+
+    Args:
+        path: Ruta al fichero (absoluta o relativa al directorio actual).
+        content: Contenido completo a escribir en el fichero.
+
+    Returns:
+        Mensaje de confirmación con ruta absoluta y número de caracteres escritos,
+        o descripción del error si falla.
+    """
+    try:
+        fpath = Path(path).resolve()
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(content, encoding="utf-8")
+        return f"Fichero escrito: {fpath} ({len(content)} caracteres)"
+    except Exception as exc:
+        return f"[Error] {exc}"
+
+
+@tool
+def list_dir(path: str = ".") -> str:
+    """Lista el contenido de un directorio mostrando tipo, tamaño y nombre.
+
+    Args:
+        path: Ruta del directorio a listar. Por defecto el directorio actual.
+
+    Returns:
+        Listado de entradas con [d] para directorios y [f] para ficheros,
+        tamaño en bytes para ficheros, o error si la ruta no existe.
+    """
+    try:
+        dpath = Path(path).resolve()
+        if not dpath.exists():
+            return f"[Error] La ruta no existe: {path}"
+        if not dpath.is_dir():
+            return f"[Error] La ruta no es un directorio: {path}"
+        entries = sorted(dpath.iterdir(), key=lambda p: (p.is_file(), p.name))
+        if not entries:
+            return f"El directorio está vacío: {dpath}"
+        lines = [f"Directorio: {dpath}", ""]
+        for entry in entries:
+            if entry.is_dir():
+                lines.append(f"  [d]  {entry.name}/")
+            else:
+                size = entry.stat().st_size
+                lines.append(f"  [f]  {size:>10} B  {entry.name}")
+        return "\n".join(lines)
+    except Exception as exc:
+        return f"[Error] {exc}"
+
+
+@tool
 def rag_search(query: str) -> str:
     """Busca en la colección de documentos locales indexados en Qdrant.
 
