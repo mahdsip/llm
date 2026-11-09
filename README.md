@@ -7,13 +7,15 @@ Agente LLM local interactivo en terminal: selección de modelo, React loop con S
 ## Arquitectura
 
 ```
-./myagent (shell)
-    └── agent/main.py
-            └── Strands Agent  ← React loop
-                    └── OllamaModel
-                            ├── qwen2.5-coder:14b
-                            └── deepseek-r1:32b
-
+myagent-local/
+├── myagent (shell)
+│   └── agent/main.py
+│           └── Strands Agent  ← React loop
+│                   └── OllamaModel
+│                           ├── qwen2.5-coder:14b
+│                           ├── deepseek-r1:32b
+│                           └── glm4:9b
+│
 (lateral — opcional)
     agent/rag/qdrant_rag.py
             └── Qdrant  ← docker compose --profile optional up qdrant
@@ -35,7 +37,7 @@ El shell script `myagent` es el punto de entrada. Parsea argumentos, activa el e
 
 ```bash
 git clone <repo>
-cd llm
+cd llm/myagent-local
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -49,16 +51,20 @@ chmod +x myagent
 ```bash
 ollama pull qwen2.5-coder:14b
 ollama pull deepseek-r1:32b
+ollama pull glm4:9b
 ollama pull nomic-embed-text   # necesario para RAG
 ```
 
 ### Uso
 
 ```bash
+cd myagent-local
 ./myagent                              # menú interactivo
 ./myagent -m qwen                      # Qwen2.5-Coder 14B
 ./myagent -m deepseek                  # DeepSeek-R1 32B
+./myagent -m glm                       # GLM-4 9B
 ./myagent -m qwen --rag --ingest ./docs/   # con RAG
+./myagent --safe -m qwen               # modo seguro (confirmación en bash_exec)
 ./myagent --list-models
 ```
 
@@ -70,8 +76,18 @@ ollama pull nomic-embed-text   # necesario para RAG
 |---|---|---|---|
 | `qwen` | `qwen2.5-coder:14b` | 14 B | Código, depuración, scripts |
 | `deepseek` | `deepseek-r1:32b` | 32 B | Razonamiento complejo, análisis |
+| `glm` | `glm4:9b` | 9 B | General + código, eficiente en VRAM (~6 GB) |
+| `glm-flash` | `glm-4.7-flash` | 30B MoE (3B activos) | Alta calidad, requiere ~16 GB VRAM |
 
 Puedes añadir modelos adicionales editando `agent/config.py` sin modificar el script de entrada.
+
+### Descargar GLM
+
+```bash
+ollama pull glm4:9b
+# o con el script:
+cd myagent-local && bash scripts/pull-models.sh
+```
 
 ---
 
@@ -235,13 +251,22 @@ El agente dispone de la herramienta `bash_exec`, que puede ejecutar cualquier co
 - Ejecutar procesos arbitrarios.
 - Acceder a la red desde la terminal.
 
+**Nuevo: flag `--safe`**
+Puedes añadir `--safe` al arrancar myagent para que el agente pida confirmación `[s/N]` antes de ejecutar cada comando con `bash_exec`. Recomendado cuando trabajas en directorios importantes: `./myagent --safe -m qwen`
+
 `bash_exec` está diseñado para uso **local y personal**, con el usuario presente en la sesión. No lo expongas a entradas no confiables ni lo ejecutes en servidores compartidos o con permisos elevados. El timeout de 30 s y el truncado de salida limitan el impacto de bucles o salidas masivas, pero no la superficie de ataque general.
 
 ---
 
 ## Variables de entorno
 
-Crea un fichero `.env` en la raíz del proyecto. Todas las variables son opcionales; los valores por defecto funcionan para un uso estándar.
+Crea un fichero `.env` en la raíz del proyecto a partir de la plantilla:
+
+```bash
+cd myagent-local && cp .env.example .env
+```
+
+Todas las variables son opcionales; los valores por defecto funcionan para un uso estándar.
 
 | Variable | Por defecto | Descripción |
 |---|---|---|
@@ -261,25 +286,19 @@ Crea un fichero `.env` en la raíz del proyecto. Todas las variables son opciona
 
 ```
 llm/
-├── myagent                    # Punto de entrada: shell script
-├── agent/
-│   ├── main.py                # Inicialización del agente Strands
-│   ├── config.py              # Mapa alias → modelo Ollama, defaults
-│   ├── tools.py               # Tools registradas con @tool (bash, filesystem, RAG)
-│   └── rag/
-│       ├── base.py            # Interfaz abstracta RAGBackend
-│       └── qdrant_rag.py      # Ingestión y consulta contra Qdrant
-├── docs/                      # Documentos de ejemplo para ingestar
-├── docker-compose.yml         # Servicios opcionales: Qdrant, OpenWebUI
-├── requirements.txt           # Dependencias Python (strands-agents, qdrant-client…)
-├── .env.example               # Plantilla de variables de entorno
-├── legacy/                    # Proyecto anterior (model-rag-local renombrado)
-│   └── README.md
-└── README.md                  # Este fichero
+├── myagent-local/
+│   ├── myagent                    # Punto de entrada: shell script
+│   ├── agent/
+│   │   ├── main.py                # Inicialización del agente Strands
+│   │   ├── config.py              # Mapa alias → modelo Ollama, defaults
+│   │   ├── tools.py               # Tools: bash_exec, file_read, file_write, list_dir, rag_search
+│   │   └── rag/
+│   │       ├── base.py            # Interfaz abstracta RAGBackend
+│   │       └── qdrant_rag.py      # Ingestión y consulta contra Qdrant
+│   ├── scripts/
+│   │   └── pull-models.sh         # Descarga de modelos Ollama
+│   ├── docker-compose.yml         # Servicios opcionales: Qdrant, OpenWebUI
+│   ├── requirements.txt           # Dependencias Python
+│   └── .env.example               # Plantilla de variables de entorno
+└── README.md                      # Este fichero
 ```
-
----
-
-## Legacy
-
-El directorio [`legacy/`](legacy/) contiene el proyecto original `model-rag-local` — un stack Docker completo con LangChain, `agentsvc`, `ragapi` y OpenWebUI sobre `llama3.1:8b`. Se conserva como referencia histórica y no recibe mantenimiento activo.
